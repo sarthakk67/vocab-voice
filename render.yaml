@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: vocab-voice
+    runtime: docker
+    plan: free           # sleeps after 15 min idle; the first load after that takes ~50s
+    healthCheckPath: /api/status
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false      # set in the Render dashboard, never in the repo
+      - key: REPO_URL
+        value: https://github.com/sarthakk67/vocab-voice
+      - key: TUTOR_DAILY_CAP
+        value: "400"
+      - key: TUTOR_VISITOR_CAP
+        value: "80"

@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en" data-theme="carbon">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vocab_</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root, [data-theme="carbon"] { --bg:#2c2e31; --sub:#646669; --border:#3c3e41; --text:#d1d0c5; --accent:#e2b714; --error:#ca4754; }
+  [data-theme="paper"] { --bg:#f4f4f2; --sub:#9a9a94; --border:#e6e6e1; --text:#2c2e31; --accent:#c9960c; --error:#b23a44; }
+  [data-theme="sepia"] { --bg:#2b2420; --sub:#8a7a68; --border:#3d332b; --text:#ead9c3; --accent:#d99a53; --error:#c26a4f; }
+  [data-theme="mint"]  { --bg:#10201a; --sub:#4f7a68; --border:#1c332a; --text:#d8f3e6; --accent:#4fd1a5; --error:#e06c75; }
+  [data-theme="nord"]  { --bg:#1f2430; --sub:#5b6478; --border:#2b3140; --text:#d8dee9; --accent:#88c0d0; --error:#bf616a; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 400 16px/1.6 "Space Mono", ui-monospace, monospace;
+    min-height: 100vh;
+  }
+  button, input { font: inherit; color: inherit; }
+  ::selection { background: var(--accent); color: var(--bg); }
+
+  .wrap { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
+
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 88px; }
+  .brand { font-weight: 700; font-size: 22px; letter-spacing: -.02em; }
+  .caret { color: var(--accent); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+
+  .themes { display: flex; gap: 14px; font-size: 13px; }
+  .themes button { background: none; border: 0; padding: 0; cursor: pointer; color: var(--sub); }
+  .themes button:hover { color: var(--text); }
+  .themes button[aria-pressed="true"] { color: var(--text); }
+
+  .banner { color: var(--sub); font-size: 13px; margin: -56px 0 48px; }
+  .banner a { color: var(--sub); text-underline-offset: 3px; }
+  .banner a:hover { color: var(--text); }
+  .remind { font-size: 14px; margin: 0 0 24px; }
+  .remind b { color: var(--accent); font-weight: 400; }
+  .levels { display: flex; gap: 18px; font-size: 13px; margin: 0 0 10px; }
+  .levels button { background: none; border: 0; padding: 0; cursor: pointer; color: var(--sub); }
+  .levels button:hover { color: var(--text); }
+  .levels button[aria-pressed="true"] { color: var(--accent); }
+  .meta { color: var(--sub); font-size: 13px; margin: 0 0 28px; }
+  .meta b { color: var(--accent); font-weight: 400; }
+
+  .pos { color: var(--sub); font-size: 13px; margin: 0 0 6px; }
+  .def { color: var(--sub); font-size: 21px; line-height: 1.5; margin: 0; min-height: 3em; }
+  .hint { color: var(--sub); margin: 10px 0 0; min-height: 1.6em; letter-spacing: .2em; }
+
+  .answer { margin-top: 36px; min-height: 52px; }
+  .heard { font-size: 32px; line-height: 1.3; margin: 0; word-break: break-word; }
+  .heard.interim { color: var(--sub); }
+  .heard:empty::before { content: "_"; color: var(--border); }
+  #typed {
+    width: 100%; background: none; border: 0; outline: 0; padding: 0;
+    font-size: 32px; line-height: 1.3; caret-color: var(--accent);
+  }
+  #typed::placeholder { color: var(--border); }
+
+  .feedback { margin: 14px 0 0; min-height: 1.6em; }
+  .feedback .ok { color: var(--accent); }
+  .feedback .no { color: var(--error); }
+  .feedback .muted, .muted { color: var(--sub); }
+  .example { color: var(--sub); margin: 4px 0 0; min-height: 1.6em; }
+
+  .controls { display: flex; align-items: center; gap: 20px; margin-top: 40px; }
+  .mic {
+    width: 64px; height: 64px; flex: none; border-radius: 50%;
+    background: none; border: 1px solid var(--sub); color: var(--sub);
+    display: grid; place-items: center; cursor: pointer; padding: 0;
+    transition: color .15s, border-color .15s;
+  }
+  .mic:hover { color: var(--text); border-color: var(--text); }
+  .mic.on { color: var(--accent); border-color: var(--accent); }
+  .mic:disabled { opacity: .35; cursor: default; }
+  .mic svg { width: 22px; height: 22px; }
+  .status { color: var(--sub); margin: 0; font-size: 14px; }
+
+  .keys { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 28px; font-size: 13px; }
+  .key { background: none; border: 0; padding: 0; color: var(--sub); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+  .key:hover { color: var(--text); }
+  .key kbd {
+    font: inherit; font-size: 12px; border: 1px solid var(--sub); border-radius: 3px;
+    padding: 0 6px; line-height: 20px; opacity: .8;
+  }
+  .key[hidden] { display: none; }
+
+  .log { list-style: none; padding: 0; margin: 72px 0 0; font-size: 14px; }
+  .log:empty { display: none; }
+  .log li { display: grid; grid-template-columns: 14ch 11ch 1fr; gap: 12px; padding: 3px 0; }
+  .log li .w { color: var(--text); }
+  .log li .h { color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log li:nth-child(n+4) { opacity: .6; }
+  .log li:nth-child(n+7) { opacity: .35; }
+
+  .summary { margin: 0; font-size: 21px; }
+  .summary + .summary { color: var(--sub); font-size: 16px; margin-top: 8px; }
+
+  footer { color: var(--sub); font-size: 12px; margin-top: 96px; opacity: .7; }
+  footer button { background: none; border: 0; padding: 0; color: var(--sub); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+  @media (max-width: 520px) {
+    header { margin-bottom: 56px; }
+    .def { font-size: 18px; }
+    .heard, #typed { font-size: 26px; }
+    .log li { grid-template-columns: 12ch 9ch 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">vocab<span class="caret">_</span></div>
+    <nav class="themes" id="themes" aria-label="theme"></nav>
+  </header>
+
+  <main>
+    <p class="banner" id="banner" hidden></p>
+    <p class="remind" id="remind" hidden></p>
+    <nav class="levels" id="levels" aria-label="level"></nav>
+    <p class="meta" id="meta"></p>
+
+    <div id="card">
+      <p class="pos" id="pos"></p>
+      <div class="def" id="def" aria-live="polite"></div>
+      <p class="hint" id="hint"></p>
+
+      <div class="answer">
+        <p class="heard" id="heard"></p>
+        <input id="typed" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="type the word" hidden>
+      </div>
+
+      <p class="feedback" id="feedback" aria-live="polite"></p>
+      <p class="example" id="example"></p>
+    </div>
+
+    <div class="controls">
+      <button class="mic" id="mic" aria-label="speak your answer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
+      </button>
+      <p class="status" id="status" aria-live="polite"></p>
+    </div>
+
+    <div class="keys" id="keys">
+      <button class="key" data-act="mic"><kbd>space</kbd><span id="micLabel">speak</span></button>
+      <button class="key" data-act="next"><kbd>enter</kbd>next</button>
+      <button class="key" data-act="skip"><kbd>tab</kbd>skip</button>
+      <button class="key" data-act="hint"><kbd>h</kbd>hint</button>
+      <button class="key" data-act="repeat"><kbd>r</kbd>repeat</button>
+      <button class="key" data-act="type"><kbd>t</kbd>type instead</button>
+      <button class="key" data-act="again"><kbd>enter</kbd>another round</button>
+    </div>
+
+    <ol class="log" id="log"></ol>
+  </main>
+
+  <footer>
+    <span id="tutorNote"></span>
+    <span id="reminderWrap" hidden>· reminders: <button id="reminderToggle"></button></span>
+    · <span id="voiceNote"></span>
+    · spoken prompts: <button id="voiceToggle"></button>
+    · say "skip", "hint" or "repeat" at any time · 1 2 3 switch level.
+  </footer>
+</div>
+
+<script type="module">
+import { LEVELS, ALL_WORDS } from "./words.js";
+
+
+const ROUND = 10;
+const THEMES = ["carbon","paper","sepia","mint","nord"];
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const synth = window.speechSynthesis;
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+const S = {
+  queue: [], pos: 0, cur: null,
+  phase: "prompt",          // prompt | speaking | listening | answered | done
+  mode: SR ? "voice" : "type",
+  level: LEVELS[store.get("vocab.level")] ? store.get("vocab.level") : "medium",
+  voice: store.get("vocab.voice") !== "off",
+  handsFree: false,         // true once the user starts talking; loop continues until paused
+  hintLevel: 0, results: [], requeued: new Set(),
+  gen: 0, roundMode: "scripted", waiting: false, advanceWhenReady: false, pending: null, why: "",
+  server: false, demo: false, repo: "", nativeReminders: true, agent: false, agentModel: "", agentNote: "", remindersOn: true,
+  rec: null, timer: null,
+};
+
+/* ---------- themes ---------- */
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  store.set("vocab.theme", t);
+  for (const b of $("themes").children) b.setAttribute("aria-pressed", b.textContent === t);
+}
+THEMES.forEach(t => {
+  const b = document.createElement("button");
+  b.textContent = t;
+  b.onclick = () => setTheme(t);
+  $("themes").append(b);
+});
+/* ---------- levels ---------- */
+function setLevel(l) {
+  S.level = l;
+  store.set("vocab.level", l);
+  for (const b of $("levels").children) b.setAttribute("aria-pressed", b.dataset.level === l);
+}
+Object.keys(LEVELS).forEach((l, i) => {
+  const b = document.createElement("button");
+  b.dataset.level = l;
+  b.textContent = l;
+  b.title = `press ${i + 1}`;
+  b.onclick = () => { if (l !== S.level) { setLevel(l); pause(); newRound(); } };
+  $("levels").append(b);
+});
+setLevel(S.level);
+
+setTheme(THEMES.includes(store.get("vocab.theme")) ? store.get("vocab.theme") : "carbon");
+
+/* ---------- matching ---------- */
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const row = [i];
+    for (let j = 1; j <= n; j++)
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = row;
+  }
+  return prev[n];
+}
+const norm = s => s.toLowerCase().replace(/[^a-z' ]/g, " ").replace(/\s+/g, " ").trim();
+const FILLER = /^(um+|uh+|so|i think|i guess|maybe|is it|it's|it is|the word is|that's|that is|a|an|the|to)\s+/;
+
+function variants(raw) {
+  let s = norm(raw);
+  while (FILLER.test(s)) s = s.replace(FILLER, "");
+  const out = new Set([s, s.replace(/ /g, "")]);
+  s.split(" ").forEach(t => t && out.add(t));
+  return [...out].filter(Boolean);
+}
+function judge(candidates, word) {
+  const target = word.w;
+  const vs = candidates.flatMap(variants);
+  if (vs.some(v => word.alt.includes(v))) return "synonym";
+  let best = Infinity;
+  for (const v of vs) best = Math.min(best, lev(v, target));
+  const tol = target.length <= 5 ? 1 : Math.floor(target.length / 4);
+  return best === 0 ? "correct" : best <= tol ? "close" : "missed";
+}
+
+/* ---------- speech out ---------- */
+let voicePick = null;
+function pickVoice() {
+  const vs = synth ? synth.getVoices() : [];
+  voicePick = vs.find(v => /en[-_](US|GB)/i.test(v.lang) && v.localService) || vs.find(v => /^en/i.test(v.lang)) || null;
+}
+if (synth) { pickVoice(); synth.onvoiceschanged = pickVoice; }
+
+function speak(text, then) {
+  if (!S.voice || !synth) { if (then) setTimeout(then, 0); return; }
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  if (voicePick) u.voice = voicePick;
+  u.rate = 0.95;
+  let done = false;
+  const fin = () => { if (done) return; done = true; clearTimeout(guard); then && then(); };
+  // some browsers drop onend; don't hang the loop on it
+  const guard = setTimeout(fin, 1200 + text.length * 95);
+  u.onend = fin; u.onerror = fin;
+  synth.speak(u);
+}
+
+/* ---------- speech in ---------- */
+function listen() {
+  if (!SR) return enterType("voice input isn't available in this browser. typing instead.");
+  stopListening();
+  const rec = new SR();
+  rec.lang = "en-US";
+  rec.interimResults = true;
+  rec.maxAlternatives = 5;
+  rec.continuous = false;
+  let err = null;
+
+  rec.onresult = e => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) return onSpoken(Array.from(r).map(a => a.transcript));
+      interim += r[0].transcript;
+    }
+    setHeard(interim, true);
+  };
+  rec.onerror = e => { err = e.error; };
+  rec.onend = () => {
+    if (S.rec !== rec) return;
+    S.rec = null;
+    if (S.phase !== "listening") return;
+    S.phase = "prompt"; S.handsFree = false;
+    if (err === "not-allowed" || err === "service-not-allowed")
+      return enterType("microphone is blocked. typing instead.");
+    setHeard("");
+    status(err === "no-speech" || !err ? "heard nothing. space to try again." : `mic error: ${err}. space to retry.`);
+    render();
+  };
+
+  S.rec = rec;
+  S.phase = "listening";
+  setHeard("");
+  status("listening.");
+  render();
+  try { rec.start(); } catch { rec.onend(); }
+}
+function stopListening() {
+  const r = S.rec; S.rec = null;
+  if (r) { try { r.abort(); } catch {} }
+}
+
+function onSpoken(alts) {
+  const said = norm(alts[0] || "");
+  stopListening();
+  if (/^(skip|pass|next|no idea|i don't know|i give up|give up)$/.test(said)) return skip();
+  if (/^(repeat|repeat that|again|say (that|it) again|one more time|what)$/.test(said)) return repeat();
+  if (/^(hint|a hint|give me a hint|clue)$/.test(said)) return hint();
+  if (/^(stop|pause)$/.test(said)) return pause();
+  setHeard(alts[0].trim());
+  submit(alts, alts[0].trim());
+}
+
+/* ---------- tutor (server-side agent) ---------- */
+async function agentTurn(body) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 45000);
+  try {
+    const res = await fetch("/api/turn", {
+      method: "POST", signal: ctl.signal, headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        level: S.level, word: S.cur?.w ?? null, hints: S.hintLevel, roundSize: ROUND, typed: S.mode === "type",
+        session: S.results.map(r => ({ w: r.w, verdict: r.verdict })), ...body,
+      }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `http ${res.status}`);
+    return await res.json();
+  } finally { clearTimeout(t); }
+}
+function agentDown(err) {
+  console.warn("tutor unavailable:", err);
+  S.agent = false;
+  const msg = String(err?.message || "").split(/\.\s/)[0].replace(/\.$/, "").toLowerCase();
+  S.agentNote = `tutor paused (${msg.length && msg.length < 90 ? msg : "unreachable"}), scripted for now`;
+  renderFooter();
+}
+function localNext() {
+  const used = new Set(S.results.map(r => r.w).concat(S.queue.map(q => q.w)));
+  const pool = LEVELS[S.level].filter(x => !used.has(x.w));
+  const from = pool.length ? pool : LEVELS[S.level];
+  return from[Math.floor(Math.random() * from.length)];
+}
+function applyLevel(l) { if (l && LEVELS[l] && l !== S.level) setLevel(l); }
+
+/* ---------- flow ---------- */
+async function newRound() {
+  const gen = ++S.gen;
+  clearTimeout(S.timer); stopListening(); synth && synth.cancel();
+  S.pos = 0; S.results = []; S.requeued = new Set(); S.cur = null;
+  S.waiting = false; S.advanceWhenReady = false; S.pending = null; S.why = "";
+  $("log").innerHTML = ""; $("heard").hidden = false;
+  if (!S.agent) {
+    S.roundMode = "scripted";
+    S.queue = [...LEVELS[S.level]].sort(() => Math.random() - 0.5).slice(0, ROUND);
+    return present();
+  }
+  S.roundMode = "agent";
+  S.queue = [];
+  S.phase = "thinking";
+  ["pos", "def", "hint", "example"].forEach(id => { $(id).textContent = ""; });
+  $("feedback").innerHTML = ""; setHeard("");
+  status("choosing a word.");
+  render();
+  try {
+    const r = await agentTurn({ event: "start" });
+    if (gen !== S.gen) return;
+    applyLevel(r.level);
+    S.queue.push(r.next); S.why = r.why_next;
+    present(r.say);
+  } catch (e) {
+    if (gen !== S.gen) return;
+    agentDown(e);
+    newRound();
+  }
+}
+
+function present(intro) {
+  clearTimeout(S.timer);
+  S.cur = S.queue[S.pos];
+  S.hintLevel = 0;
+  S.phase = "prompt";
+  const again = S.results.some(r => r.w === S.cur.w);
+  $("pos").textContent = S.cur.pos + (again ? "  · again" : "") + (S.roundMode === "agent" && S.why ? `  · ${S.why}` : "");
+  $("def").textContent = S.cur.def;
+  $("hint").textContent = "";
+  $("feedback").innerHTML = "";
+  $("example").textContent = "";
+  setHeard("");
+  $("typed").value = ""; $("typed").readOnly = false;
+  if (S.mode === "type") { status(intro || "enter to check."); $("typed").focus(); }
+  else status(intro || (S.handsFree ? "" : "say the word. space to start."));
+  render();
+  if (S.handsFree && S.mode === "voice") ask(intro);
+}
+
+function ask(intro) {
+  S.phase = "speaking"; render();
+  speak((intro ? intro + " " : "") + S.cur.def, () => { if (S.phase === "speaking") listen(); });
+}
+
+// Everything the learner says or types that isn't a local command lands here.
+function submit(alts, heard) {
+  const local = judge(alts, S.cur);
+  if (!S.agent) return answer(local, heard).then(afterAnswer);
+  S.pending = tutorTurn("answer", alts, heard, local);
+}
+
+async function tutorTurn(event, alts, heard, local) {
+  const gen = S.gen;
+  // Exact / near-spelling answers and skips show instantly; the tutor only has to pick what's next.
+  const fast = event === "skip" || local === "correct" || local === "close";
+  let spoken = fast ? answer(local, heard) : Promise.resolve();
+  if (!fast) { stopListening(); S.phase = "thinking"; status("thinking."); render(); }
+  S.waiting = true;
+  let r;
+  try {
+    r = await agentTurn({ event, heard: alts, local });
+  } catch (e) {
+    if (gen !== S.gen) return;
+    agentDown(e);
+    S.waiting = false;
+    if (!fast) spoken = answer(local, heard);
+    S.queue.push(localNext());
+    await spoken;
+    return afterAnswer();
+  }
+  if (gen !== S.gen) return;
+  S.waiting = false;
+  applyLevel(r.level);
+
+  if (r.verdict === "none") { // a question or aside, not an answer: reply and stay on this word
+    S.phase = "prompt";
+    $("feedback").innerHTML = `<span class="muted"></span>`;
+    $("feedback").firstChild.textContent = r.say || r.feedback;
+    $("typed").value = "";
+    status(S.mode === "type" ? "enter to check." : "");
+    render();
+    speak(r.say, () => { if (S.phase === "prompt" && S.handsFree && S.mode === "voice") listen(); });
+    return;
+  }
+
+  if (!fast) spoken = answer(r.verdict, heard, r.feedback, r.say);
+  else {
+    if (r.feedback || r.say) addFeedback(r.feedback || r.say);
+    if (r.say) spoken = spoken.then(() => new Promise(done => gen === S.gen ? speak(r.say, done) : done()));
+  }
+  if (r.next) { S.queue.push(r.next); S.why = r.why_next; }
+  await spoken;
+  if (gen === S.gen) afterAnswer();
+}
+
+function addFeedback(text) {
+  const m = document.createElement("span");
+  m.className = "muted";
+  m.textContent = "  " + text;
+  $("feedback").append(m);
+}
+
+function answer(verdict, heard, extra = "", sayLine = "") {
+  clearTimeout(S.timer);
+  stopListening();
+  S.phase = "answered";
+  const w = S.cur.w;
+  const again = S.results.some(r => r.w === w);
+  S.results.push({ w, verdict, heard, again });
+
+  const fb = $("feedback");
+  if (verdict === "correct") fb.innerHTML = `<span class="ok">✓ correct</span>`;
+  else if (verdict === "synonym") fb.innerHTML = `<span class="ok">✓ close</span> <span class="muted">— right meaning, the word was</span> ${w}`;
+  else if (verdict === "close") fb.innerHTML = `<span class="ok">✓ close</span> <span class="muted">—</span> ${w}`;
+  else if (verdict === "skipped") fb.innerHTML = `<span class="no">✗ skipped</span> <span class="muted">—</span> ${w}`;
+  else fb.innerHTML = `<span class="no">✗</span> ${w}`;
+  if (extra) addFeedback(extra);
+  $("example").textContent = S.cur.ex;
+  $("typed").readOnly = true;
+
+  if (S.roundMode === "scripted" && (verdict === "missed" || verdict === "skipped")) {
+    if (!S.requeued.has(w)) { S.requeued.add(w); S.queue.push(S.cur); }
+  }
+  log(w, verdict, heard);
+  status(S.mode === "voice" && S.handsFree ? "" : "enter for next.");
+  render();
+
+  const line = sayLine || { correct: "Correct.", close: `Close enough. ${w}.`, synonym: `Right meaning. The word was ${w}.`, missed: `No. It was ${w}.`, skipped: `It was ${w}.` }[verdict];
+  return new Promise(done => speak(line, done));
+}
+
+function afterAnswer() {
+  if (S.phase !== "answered") return;
+  if (S.advanceWhenReady) return next();
+  if (S.mode === "voice" && S.handsFree) S.timer = setTimeout(next, 1200);
+}
+
+function next() {
+  clearTimeout(S.timer);
+  if (S.phase === "done") return newRound();
+  if (S.phase !== "answered") return;
+  if (S.roundMode === "agent") {
+    if (S.results.length >= ROUND) return finish();
+    if (S.pos + 1 >= S.queue.length) {
+      if (S.waiting) { S.advanceWhenReady = true; status("thinking."); return; }
+      S.queue.push(localNext());
+    }
+  }
+  S.advanceWhenReady = false;
+  S.pos++;
+  if (S.pos >= S.queue.length) return finish();
+  present();
+}
+
+function finish() {
+  stopListening();
+  S.phase = "done"; S.handsFree = false;
+  const first = S.results.filter(r => !r.again);
+  const c = k => first.filter(r => r.verdict === k).length;
+  const ok = c("correct") + c("close") + c("synonym");
+  const missed = first.filter(r => r.verdict === "missed" || r.verdict === "skipped").map(r => r.w);
+  const recovered = S.results.filter(r => r.again && r.verdict !== "missed" && r.verdict !== "skipped").length;
+  $("pos").textContent = "";
+  $("def").innerHTML = `<p class="summary" style="color:var(--text)">${ok} / ${first.length}.</p>` +
+    `<p class="summary">${c("correct")} exact, ${c("close") + c("synonym")} close, ${missed.length} missed` +
+    (missed.length ? `, ${recovered} recovered on the second pass.` : ".") + `</p>`;
+  $("hint").textContent = "";
+  $("feedback").innerHTML = missed.length ? `<span class="muted">worth another look:</span> ${missed.join(", ")}` : `<span class="muted">nothing to review.</span>`;
+  $("example").textContent = "";
+  setHeard(""); $("typed").hidden = true; $("heard").hidden = true;
+  status("enter for another round.");
+  render();
+  speak(`Done. ${ok} of ${first.length}.`);
+  showReminders();
+}
+
+// The tutor schedules reminders on the last turn; show what it decided once that turn lands.
+async function showReminders() {
+  if (!S.server) return;
+  const gen = S.gen;
+  await S.pending?.catch(() => {});
+  try {
+    const { on, pending } = await (await fetch("/api/reminders")).json();
+    if (gen !== S.gen || S.phase !== "done") return;
+    if (!on) return $("example").textContent = "reminders are off.";
+    if (!pending.length) return;
+    const r = pending[0];
+    const at = new Date(r.at).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    $("example").textContent = `reminder set · ${r.words.join(", ")} · ${at}` + (pending.length > 1 ? `  (+${pending.length - 1} more)` : "") +
+      (S.nativeReminders ? "" : " · shown here if this tab is open");
+    if (!S.nativeReminders && "Notification" in window && Notification.permission === "default") {
+      const b = document.createElement("button");
+      b.className = "key"; b.style.marginLeft = "12px";
+      b.innerHTML = "<kbd>n</kbd>notify me";
+      b.onclick = askNotify;
+      $("example").append(b);
+    }
+  } catch {}
+}
+
+function skip() {
+  if (!["prompt", "listening", "speaking"].includes(S.phase)) return;
+  synth && synth.cancel();
+  setHeard("");
+  if (S.agent) { S.pending = tutorTurn("skip", [], null, "skipped"); return; }
+  answer("skipped", null).then(afterAnswer);
+}
+
+function hint() {
+  if (!["prompt", "listening", "speaking"].includes(S.phase)) return;
+  const w = S.cur.w;
+  S.hintLevel = Math.min(S.hintLevel + 1, 2);
+  const show = S.hintLevel === 1 ? 1 : 3;
+  $("hint").textContent = w.slice(0, show) + " _".repeat(w.length - show).replace(/^ /, " ") + `   (${w.length})`;
+  const said = S.hintLevel === 1
+    ? `Starts with ${w[0].toUpperCase()}. ${w.length} letters.`
+    : `Starts with ${w.slice(0, 3).toUpperCase().split("").join(" ")}.`;
+  if (S.mode === "voice" && (S.handsFree || S.phase === "listening")) {
+    stopListening(); S.handsFree = true; S.phase = "speaking"; render();
+    speak(said, () => { if (S.phase === "speaking") listen(); });
+  } else speak(said);
+}
+
+function repeat() {
+  if (!["prompt", "listening", "speaking"].includes(S.phase)) return;
+  stopListening();
+  if (S.mode === "voice") { S.handsFree = true; ask(); }
+  else { S.phase = "prompt"; speak(S.cur.def); render(); }
+}
+
+function pause() {
+  stopListening(); synth && synth.cancel(); clearTimeout(S.timer);
+  S.handsFree = false;
+  if (S.phase === "listening" || S.phase === "speaking") S.phase = "prompt";
+  status("paused. space to resume.");
+  render();
+}
+
+function micPress() {
+  if (S.phase === "done") return newRound();
+  if (S.mode === "type") { exitType(); S.handsFree = true; return S.phase === "answered" ? next() : ask(); }
+  if (S.phase === "listening" || S.phase === "speaking") return pause();
+  if (S.phase === "answered") { S.handsFree = true; return next(); }
+  S.handsFree = true;
+  ask();
+}
+
+function enterType(msg) {
+  stopListening(); synth && synth.cancel(); clearTimeout(S.timer);
+  S.mode = "type"; S.handsFree = false;
+  if (S.phase === "listening" || S.phase === "speaking") S.phase = "prompt";
+  status(msg || (S.phase === "answered" ? "enter for next." : "enter to check. esc for voice."));
+  render();
+  $("typed").focus();
+}
+function exitType() {
+  if (!SR) return;
+  S.mode = "voice";
+  $("typed").blur();
+  status("space to speak.");
+  render();
+}
+
+/* ---------- hosted extras ---------- */
+function renderBanner() {
+  if (!S.demo) return;
+  const b = $("banner");
+  b.hidden = false;
+  b.textContent = "demo · voice needs chrome or edge; press t to type · your progress stays in this browser";
+  if (S.repo) {
+    const a = document.createElement("a");
+    a.href = S.repo; a.target = "_blank"; a.rel = "noopener"; a.textContent = "source";
+    b.append(" · ", a);
+  }
+}
+function askNotify() {
+  if ("Notification" in window) Notification.requestPermission().then(() => showReminders());
+}
+// Hosted, the server can't raise desktop notifications, so the page picks up due reminders itself.
+async function pollReminders() {
+  try {
+    const { due } = await (await fetch("/api/reminders?take=1")).json();
+    for (const r of due) {
+      const line = r.message || `review: ${r.words.join(", ")}`;
+      const el = $("remind");
+      el.hidden = false;
+      el.innerHTML = "<b>reminder</b> · ";
+      el.append(line);
+      if ("Notification" in window && Notification.permission === "granted") new Notification("vocab_", { body: line });
+    }
+  } catch {}
+}
+
+/* ---------- view ---------- */
+function status(t) { $("status").textContent = t; }
+function setHeard(t, interim = false) {
+  $("heard").textContent = t;
+  $("heard").classList.toggle("interim", interim);
+}
+function log(w, verdict, heard) {
+  const li = document.createElement("li");
+  const mark = { correct: "✓ correct", close: "✓ close", synonym: "✓ synonym", missed: "✗ missed", skipped: "✗ skipped" }[verdict];
+  li.innerHTML = `<span class="w"></span><span style="color:var(${verdict !== "missed" && verdict !== "skipped" ? "--accent" : "--error"})">${mark}</span><span class="h"></span>`;
+  li.querySelector(".w").textContent = w;
+  li.querySelector(".h").textContent = heard && norm(heard) !== w ? `"${heard}"` : "";
+  $("log").prepend(li);
+}
+function render() {
+  const p = S.phase, typing = S.mode === "type", done = p === "done";
+  const [n, of] = S.roundMode === "agent"
+    ? [Math.min(S.results.length + (p === "answered" ? 0 : 1), ROUND), ROUND]
+    : [Math.min(S.pos + 1, S.queue.length), S.queue.length];
+  $("meta").innerHTML = done ? "round complete" :
+    `${String(n).padStart(2, "0")} / ${String(of).padStart(2, "0")}` +
+    `  ·  <b>${S.results.filter(r => r.verdict !== "missed" && r.verdict !== "skipped").length}</b> right` +
+    `  ·  ${S.results.filter(r => r.verdict === "missed" || r.verdict === "skipped").length} missed`;
+  $("typed").hidden = !typing || done;
+  $("heard").hidden = typing || done;
+  const mic = $("mic");
+  mic.classList.toggle("on", p === "listening");
+  mic.disabled = !SR;
+  mic.setAttribute("aria-label", p === "listening" ? "stop listening" : "speak your answer");
+  $("micLabel").textContent = p === "listening" || p === "speaking" ? "pause" : typing ? "use voice" : "speak";
+  const vis = {
+    mic: !!SR && !done,
+    next: p === "answered",
+    skip: !done && p !== "answered" && p !== "thinking",
+    hint: !done && p !== "answered" && p !== "thinking",
+    repeat: !done && p !== "answered" && p !== "thinking",
+    type: !done && !typing,
+    again: done,
+  };
+  for (const b of $("keys").children) b.hidden = !vis[b.dataset.act];
+  if (typing && !done && document.activeElement !== $("typed")) $("typed").focus();
+}
+function renderFooter() {
+  $("voiceNote").textContent = SR ? "speech runs through your browser's web speech api" : "no speech recognition here; chrome, edge or safari will do";
+  $("voiceToggle").textContent = S.voice ? "on" : "off";
+  $("tutorNote").textContent = S.agent ? `tutor: ${S.agentModel}` : S.agentNote || "tutor: off, scripted mode";
+  $("reminderWrap").hidden = !S.server;
+  $("reminderToggle").textContent = S.remindersOn ? "on" : "off";
+}
+$("reminderToggle").onclick = async () => {
+  try {
+    const r = await fetch(`/api/reminders?on=${S.remindersOn ? 0 : 1}`, { method: "POST" });
+    S.remindersOn = (await r.json()).on;
+  } catch {}
+  renderFooter();
+};
+$("voiceToggle").onclick = () => {
+  S.voice = !S.voice; store.set("vocab.voice", S.voice ? "on" : "off");
+  if (!S.voice && synth) synth.cancel();
+  renderFooter();
+};
+
+/* ---------- input ---------- */
+$("mic").onclick = micPress;
+$("keys").onclick = e => {
+  const b = e.target.closest(".key"); if (!b) return;
+  ({ mic: micPress, next, skip, hint, repeat, type: () => enterType(), again: newRound })[b.dataset.act]();
+};
+$("typed").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (S.phase === "answered" || S.phase === "done") return next();
+    const v = $("typed").value.trim();
+    if (v && S.phase === "prompt") submit([v], v);
+  } else if (e.key === "Escape") { e.preventDefault(); exitType(); }
+  else if (e.key === "Tab") { e.preventDefault(); skip(); }
+});
+document.addEventListener("keydown", e => {
+  if (e.target === $("typed") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.tagName === "BUTTON" && (e.key === "Enter" || e.key === " ")) return; // let focused buttons act normally
+  const k = e.key.toLowerCase();
+  const lvl = Object.keys(LEVELS)[+k - 1];
+  if (lvl) { e.preventDefault(); if (lvl !== S.level) { setLevel(lvl); pause(); newRound(); } return; }
+  if (k === "n" && S.phase === "done" && !S.nativeReminders) { e.preventDefault(); return askNotify(); }
+  const act = { " ": micPress, tab: skip, h: hint, r: repeat, t: () => enterType(), escape: pause,
+                enter: () => (S.phase === "answered" || S.phase === "done") && next() }[k];
+  if (act) { e.preventDefault(); act(); }
+});
+
+// Served by server.js the tutor is available; opened as a plain file it falls back to scripted mode.
+try {
+  const st = await (await fetch("/api/status")).json();
+  S.server = true;
+  S.agent = st.agent; S.agentModel = st.model || "";
+  S.demo = st.demo; S.repo = st.repo || ""; S.nativeReminders = st.nativeReminders;
+  if (!st.agent) S.agentNote = `tutor: off (${st.reason}), scripted mode`;
+  S.remindersOn = (await (await fetch("/api/reminders")).json()).on;
+} catch {}
+renderFooter();
+renderBanner();
+if (S.server && !S.nativeReminders) { pollReminders(); setInterval(pollReminders, 30000); }
+newRound();
+</script>
+</body>
+</html>
