@@ -5,8 +5,12 @@ services:
     plan: free           # sleeps after 15 min idle; the first load after that takes ~50s
     healthCheckPath: /api/status
     envVars:
-      - key: ANTHROPIC_API_KEY
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
         sync: false      # set in the Render dashboard, never in the repo
+      - key: ANTHROPIC_API_KEY
+        sync: false
       - key: REPO_URL
         value: https://github.com/sarthakk67/vocab-voice
       - key: TUTOR_DAILY_CAP

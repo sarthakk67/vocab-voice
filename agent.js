@@ -1,9 +1,16 @@
-// The tutor agent: one call per learner turn, Claude decides via tools.
-import Anthropic from "@anthropic-ai/sdk";
+// The tutor agent: one model call per learner turn; the model decides via tools.
+// Same prompt, tools and validation for both providers; only the API loop differs.
 import { LEVELS, findWord, levelOf } from "./words.js";
 
-export const MODEL = "claude-opus-5";
-const client = new Anthropic();
+const hasClaude = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+const hasGemini = Boolean(process.env.GEMINI_API_KEY);
+export const PROVIDER = process.env.LLM_PROVIDER || (hasClaude ? "claude" : hasGemini ? "gemini" : null);
+// Gemini's free tier has busy spells (503/429); on those, the next model in the list takes the turn.
+const GEMINI_MODELS = (process.env.GEMINI_MODELS || "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.8-flash").split(",").map(m => m.trim());
+export const MODEL = PROVIDER === "gemini" ? GEMINI_MODELS[0] : "claude-opus-5";
+
+const client = PROVIDER === "claude" ? new (await import("@anthropic-ai/sdk")).default() : null;
+const gemini = PROVIDER === "gemini" ? new (await import("@google/genai")).GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
 const BANK = Object.entries(LEVELS).map(([l, ws]) => `${l}: ${ws.map(x => x.w).join(", ")}`).join("\n");
 
@@ -37,8 +44,8 @@ Reminders. Missed words should come back later, outside the app. When the round 
 Finish every turn by calling respond. It records your verdict and tells the app what to show and say. When you already have what you need, call respond (and add_note or set_difficulty if needed) in a single turn; don't look things up you already have.
 
 Voice. The app is quiet and a little dry, for people who already know how to focus.
-- say is spoken aloud. Keep it under 20 words, plain sentences, no exclamation marks, no praise words like "great" or "awesome". For a correct answer it can be empty; the app already says "Correct." For a miss, say the word and at most one short clarifying clause. For none, answer the question.
-- feedback is shown under the verdict mark. Lowercase, under 12 words, or empty. It adds something the mark doesn't: why the answer was off, or how it differs from the target. Don't restate "correct" or "wrong".
+- say is spoken aloud. Keep it under 20 words, plain sentences, no exclamation marks, no praise words like "great" or "awesome". For a correct answer it can be empty; the app already says "Correct." For a miss, say the word and at most one short clarifying clause. For none, answer the question and write "blank" wherever the target word would go. Never read out, hint at, or ask about the next word; the app reads its definition right after you.
+- feedback is shown under the verdict mark. Lowercase, under 12 words, or empty. It adds something the mark doesn't: why the answer was off, or how it differs from the target. The app already shows the verdict and the target word, so never just restate them; leave feedback empty rather than repeat. For none, leave it empty.
 - why_next is shown faintly. Under 6 words, lowercase, e.g. "missed earlier", "due for review", "new at hard".
 
 Word bank:
@@ -142,6 +149,12 @@ function renderTurn(t, learner) {
   return lines.join("\n");
 }
 
+// Blank out the word and its inflections ("sycophants", "obfuscated"), matched on a stem.
+export function maskWord(text, word) {
+  const stem = word.length > 5 ? word.slice(0, -1) : word;
+  return text.replace(new RegExp(`\\b${stem}[a-z]*`, "gi"), "blank");
+}
+
 function runTool(name, input, turn, trace, learner) {
   switch (name) {
     case "set_difficulty":
@@ -172,6 +185,10 @@ function runTool(name, input, turn, trace, learner) {
         return { content: "next_word is required here.", error: true };
       if (turn.event === "skip" && input.verdict !== "skipped")
         return { content: "This was a skip event; verdict must be skipped.", error: true };
+      // A reply to a question must not give the answer away, whatever the model wrote.
+      if (input.verdict === "none" && turn.word) {
+        input = { ...input, say: maskWord(input.say, turn.word), feedback: maskWord(input.feedback, turn.word) };
+      }
       if (turn.word && input.verdict !== "none") learner.record(turn.word, input.verdict);
       trace.push(`respond(${input.verdict} → ${input.next_word || "same word"})`);
       return { content: "ok", final: input };
@@ -186,8 +203,20 @@ export async function runTurn(turn, learner) {
   if (turn.event === "start" && turn.level) learner.setLevel(turn.level, "chosen in the app", "learner");
 
   const trace = [];
-  const messages = [{ role: "user", content: renderTurn(turn, learner) }];
+  const exec = (name, input) => runTool(name, input, turn, trace, learner);
+  const final = PROVIDER === "gemini"
+    ? await geminiLoop(renderTurn(turn, learner), exec)
+    : await claudeLoop(renderTurn(turn, learner), exec);
+  return {
+    ...final,
+    next: final.next_word ? findWord(final.next_word) : null,
+    level: learner.getLevel(),
+    trace,
+  };
+}
 
+async function claudeLoop(prompt, exec) {
+  const messages = [{ role: "user", content: prompt }];
   for (let step = 0; step < 4; step++) {
     const res = await client.beta.messages.create({
       model: MODEL,
@@ -213,19 +242,60 @@ export async function runTurn(turn, learner) {
 
     let final = null;
     const results = uses.map(u => {
-      const r = runTool(u.name, u.input, turn, trace, learner);
+      const r = exec(u.name, u.input);
       if (r.final) final = r.final;
       return { type: "tool_result", tool_use_id: u.id, content: r.content, ...(r.error && { is_error: true }) };
     });
-    if (final) {
-      return {
-        ...final,
-        next: final.next_word ? findWord(final.next_word) : null,
-        level: learner.getLevel(),
-        trace,
-      };
-    }
+    if (final) return final;
     messages.push({ role: "user", content: results });
+  }
+  throw new Error("tutor did not finish the turn");
+}
+
+const GEMINI_TOOLS = [{
+  functionDeclarations: TOOLS.map(t => ({ name: t.name, description: t.description, parametersJsonSchema: t.input_schema })),
+}];
+
+async function geminiCall(contents) {
+  let lastErr;
+  for (const model of GEMINI_MODELS) {
+    try {
+      return await gemini.models.generateContent({ model, contents, config: {
+        systemInstruction: SYSTEM,
+        tools: GEMINI_TOOLS,
+        thinkingConfig: { thinkingLevel: "LOW" }, // one short decision per turn; latency matters more than depth
+      } });
+    } catch (err) {
+      if (![429, 500, 503].includes(err.status)) throw err;
+      console.warn(`${model} busy (${err.status}), trying next`);
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+async function geminiLoop(prompt, exec) {
+  const contents = [{ role: "user", parts: [{ text: prompt }] }];
+  for (let step = 0; step < 4; step++) {
+    const res = await geminiCall(contents);
+    const content = res.candidates?.[0]?.content;
+    const calls = res.functionCalls ?? [];
+    if (!content) throw new Error(`no response from model (${res.promptFeedback?.blockReason ?? res.candidates?.[0]?.finishReason ?? "empty"})`);
+    // Echo the model's turn back unchanged; it carries thought signatures the next call needs.
+    contents.push(content);
+    if (!calls.length) {
+      contents.push({ role: "user", parts: [{ text: "Finish the turn by calling respond." }] });
+      continue;
+    }
+
+    let final = null;
+    const parts = calls.map(c => {
+      const r = exec(c.name, c.args ?? {});
+      if (r.final) final = r.final;
+      return { functionResponse: { id: c.id, name: c.name, response: r.error ? { error: r.content } : { output: r.content } } };
+    });
+    if (final) return final;
+    contents.push({ role: "user", parts });
   }
   throw new Error("tutor did not finish the turn");
 }

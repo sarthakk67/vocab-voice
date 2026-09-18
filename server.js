@@ -19,7 +19,7 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; ch
 const PUBLIC = new Set(["/index.html", "/words.js"]);
 
 // Without credentials the page still works in its scripted mode.
-const hasKey = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+const hasKey = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.GEMINI_API_KEY);
 const agent = hasKey ? await import("./agent.js") : null;
 startNotifier();
 
@@ -73,7 +73,7 @@ http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/api/status")
       return send(res, 200, {
-        agent: Boolean(agent), model: agent?.MODEL, reason: agent ? undefined : "no ANTHROPIC_API_KEY",
+        agent: Boolean(agent), model: agent?.MODEL, reason: agent ? undefined : "no API key",
         demo: DEMO, repo: REPO_URL, nativeReminders: NATIVE,
       }, undefined, set);
 
@@ -100,7 +100,7 @@ http.createServer(async (req, res) => {
     send(res, 200, await fs.readFile(path.join(ROOT, file), "utf8"), TYPES[path.extname(file)], set);
   } catch (err) {
     // API errors carry a readable message (bad key, no credit, rate limit); keep the log to one line.
-    const msg = err?.error?.error?.message || err.message;
+    const msg = err?.error?.error?.message || err.message; // (Gemini errors put the reason in err.message)
     console.error(`error: ${err.status ?? ""} ${msg}`);
     send(res, 500, { error: msg }, undefined, set);
   }
