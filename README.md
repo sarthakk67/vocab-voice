@@ -2,7 +2,7 @@
 
 A spoken vocabulary drill with a Claude tutor deciding what happens next. The page reads a definition aloud, you say the word, and the tutor judges your answer, picks the next word, adjusts difficulty, and schedules reminders for the words you missed.
 
-**Live demo:** _link_ · **90-second walkthrough:** _link_
+**Live demo:** https://vocab-voice.onrender.com · **90-second walkthrough:** _link_
 Voice needs Chrome or Edge. Press `t` to type instead. The demo is on a free tier, so if nobody has used it for a while, the first load takes up to a minute.
 
 ## What the agent actually decides

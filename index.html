@@ -356,7 +356,9 @@ function agentDown(err) {
   console.warn("tutor unavailable:", err);
   S.agent = false;
   const msg = String(err?.message || "").split(/\.\s/)[0].replace(/\.$/, "").toLowerCase();
-  S.agentNote = `tutor paused (${msg.length && msg.length < 90 ? msg : "unreachable"}), scripted for now`;
+  // Visitors to the hosted demo don't need billing or rate-limit details; the server log has them.
+  S.agentNote = S.demo ? "tutor offline right now, scripted mode"
+    : `tutor paused (${msg.length && msg.length < 90 ? msg : "unreachable"}), scripted for now`;
   renderFooter();
 }
 function localNext() {
