@@ -6,6 +6,7 @@ const hasClaude = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC
 const hasGemini = Boolean(process.env.GEMINI_API_KEY);
 export const PROVIDER = process.env.LLM_PROVIDER || (hasClaude ? "claude" : hasGemini ? "gemini" : null);
 // Gemini's free tier has busy spells (503/429); on those, the next model in the list takes the turn.
+const TURN_TIMEOUT_MS = Number(process.env.TURN_TIMEOUT_MS) || 12_000;
 const GEMINI_MODELS = (process.env.GEMINI_MODELS || "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.8-flash").split(",").map(m => m.trim());
 export const MODEL = PROVIDER === "gemini" ? GEMINI_MODELS[0] : "claude-opus-5";
 
@@ -276,15 +277,19 @@ const GEMINI_TOOLS = [{
 async function geminiCall(contents, system) {
   let lastErr;
   for (const model of GEMINI_MODELS) {
+    const t0 = Date.now();
     try {
       return await gemini.models.generateContent({ model, contents, config: {
         systemInstruction: system,
         tools: GEMINI_TOOLS,
         thinkingConfig: { thinkingLevel: "LOW" }, // one short decision per turn; latency matters more than depth
-      } });
+        // Don't let the SDK sit in its own backoff: a busy model should hand over to the next one now.
+        httpOptions: { timeout: TURN_TIMEOUT_MS, retryOptions: { attempts: 1 } },
+      } }).then(r => { console.log(`  ${model} ${Date.now() - t0}ms`); return r; });
     } catch (err) {
-      if (![429, 500, 503].includes(err.status)) throw err;
-      console.warn(`${model} busy (${err.status}), trying next`);
+      const busy = [429, 500, 503].includes(err.status) || /timeout|aborted|deadline/i.test(err.message ?? "");
+      if (!busy) throw err;
+      console.warn(`  ${model} busy (${err.status ?? err.message?.slice(0, 40)}) after ${Date.now() - t0}ms, trying next`);
       lastErr = err;
     }
   }
