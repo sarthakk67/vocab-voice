@@ -64,6 +64,7 @@ function makeLearner(file) {
     },
 
     wordHistory: w => state.words[w] ?? null,
+    seenWords: () => Object.keys(state.words),
 
     // Compact snapshot handed to the model each turn.
     snapshot(sessionWords) {
@@ -84,6 +85,7 @@ function makeLearner(file) {
     remindersOn: () => state.remindersOn !== false,
     setRemindersOn(on) { state.remindersOn = on; save(); },
     addReminder(minutes, words, message) {
+      if (!Number.isFinite(minutes)) throw new Error("reminder needs a numeric delay");
       const r = { id: Date.now().toString(36), at: Date.now() + minutes * MIN, words, message, sent: false };
       reminders().push(r);
       save();

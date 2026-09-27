@@ -163,6 +163,7 @@
   <footer>
     <span id="tutorNote"></span>
     <span id="reminderWrap" hidden>· reminders: <button id="reminderToggle"></button></span>
+    <span id="engineWrap" hidden>· voice: <button id="engineToggle"></button></span>
     · <span id="voiceNote"></span>
     · spoken prompts: <button id="voiceToggle"></button>
     · say "skip", "hint" or "repeat" at any time · 1 2 3 switch level.
@@ -170,10 +171,10 @@
 </div>
 
 <script type="module">
-import { LEVELS, ALL_WORDS } from "./words.js";
+import { LEVELS, ALL_WORDS, DAILY, dailyWords, dayIndex } from "./words.js";
 
 
-const ROUND = 10;
+const ROUND = DAILY;   // one round is today's five words at your level
 const THEMES = ["carbon","paper","sepia","mint","nord"];
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const synth = window.speechSynthesis;
@@ -192,7 +193,7 @@ const S = {
   handsFree: false,         // true once the user starts talking; loop continues until paused
   hintLevel: 0, results: [], requeued: new Set(),
   gen: 0, roundMode: "scripted", waiting: false, advanceWhenReady: false, pending: null, why: "",
-  server: false, demo: false, repo: "", nativeReminders: true, agent: false, agentModel: "", agentNote: "", remindersOn: true,
+  server: false, sarvam: false, useSarvam: false, demo: false, repo: "", nativeReminders: true, agent: false, agentModel: "", agentNote: "", remindersOn: true,
   rec: null, timer: null,
 };
 
@@ -266,8 +267,19 @@ function pickVoice() {
 }
 if (synth) { pickVoice(); synth.onvoiceschanged = pickVoice; }
 
+let audioEl = null;
+function stopAudio() {
+  if (audioEl) { audioEl.pause(); audioEl = null; }
+}
+function stopSpeech() {
+  if (synth) synth.cancel();
+  stopAudio();
+}
+
 function speak(text, then) {
-  if (!S.voice || !synth) { if (then) setTimeout(then, 0); return; }
+  if (!S.voice || !text) { if (then) setTimeout(then, 0); return; }
+  if (S.useSarvam) return speakSarvam(text, then);
+  if (!synth) { if (then) setTimeout(then, 0); return; }
   synth.cancel();
   const u = new SpeechSynthesisUtterance(text);
   if (voicePick) u.voice = voicePick;
@@ -280,8 +292,32 @@ function speak(text, then) {
   synth.speak(u);
 }
 
+// Sarvam's voice, fetched from the server (definitions are cached there).
+async function speakSarvam(text, then) {
+  stopAudio();
+  const mine = ++speakSeq;
+  try {
+    const res = await fetch("/api/tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+    const { audio, error } = await res.json();
+    if (error || !audio) throw new Error(error || "no audio");
+    if (mine !== speakSeq) return;                    // superseded while fetching
+    const a = new Audio("data:audio/wav;base64," + audio);
+    audioEl = a;
+    const done = () => { if (audioEl === a) audioEl = null; then && then(); };
+    a.onended = done;
+    a.onerror = done;
+    await a.play();
+  } catch (err) {
+    console.warn("sarvam voice:", err);
+    S.useSarvam = false; store.set("vocab.engine", "browser"); renderFooter();
+    speak(text, then);
+  }
+}
+let speakSeq = 0;
+
 /* ---------- speech in ---------- */
 function listen() {
+  if (S.useSarvam) return listenSarvam();
   if (!SR) return enterType("voice input isn't available in this browser. typing instead.");
   stopListening();
   const rec = new SR();
@@ -323,6 +359,96 @@ function listen() {
 function stopListening() {
   const r = S.rec; S.rec = null;
   if (r) { try { r.abort(); } catch {} }
+  if (media.rec) { media.cancel = true; try { media.rec.stop(); } catch {} media.rec = null; }
+  stopVad();
+}
+
+/* ---------- recording for Sarvam ---------- */
+const media = { stream: null, rec: null, cancel: false, vad: null };
+
+async function listenSarvam() {
+  stopListening();
+  let stream;
+  try {
+    media.stream ??= await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream = media.stream;
+  } catch {
+    media.stream = null;
+    return enterType("microphone is blocked. typing instead.");
+  }
+  const mime = ["audio/webm", "audio/mp4", "audio/ogg"].find(m => MediaRecorder.isTypeSupported(m)) || "";
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  const type = rec.mimeType || mime || "audio/webm";
+  const chunks = [];
+  media.rec = rec;
+  media.cancel = false;
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  rec.onstop = async () => {
+    stopVad();
+    if (media.rec === rec) media.rec = null;
+    if (media.cancel || S.phase !== "listening") return;
+    const blob = new Blob(chunks, { type });
+    if (blob.size < 1500) return nothingHeard();
+    S.phase = "thinking"; status("…"); render();
+    const gen = S.gen;
+    try {
+      const res = await fetch("/api/stt", { method: "POST", headers: { "content-type": type }, body: blob });
+      const { text, error } = await res.json();
+      if (error) throw new Error(error);
+      if (gen !== S.gen) return;
+      if (!text) { S.phase = "listening"; return nothingHeard(); }
+      setHeard(text);
+      onSpoken([text]);
+    } catch (err) {
+      console.warn("sarvam transcribe:", err);
+      S.useSarvam = false; store.set("vocab.engine", "browser"); renderFooter();
+      S.phase = "prompt"; S.handsFree = false;
+      status(SR ? "sarvam voice unavailable. space to try browser voice." : "sarvam voice unavailable. press t to type.");
+      render();
+    }
+  };
+  S.phase = "listening";
+  setHeard("");
+  status("listening.");
+  render();
+  rec.start();
+  startVad(stream, () => { if (rec.state === "recording") rec.stop(); });
+}
+
+function nothingHeard() {
+  S.phase = "prompt"; S.handsFree = false;
+  setHeard("");
+  status("heard nothing. space to try again.");
+  render();
+}
+
+// Stop recording shortly after the speaker stops, so hands-free turns don't need a button.
+function startVad(stream, onDone) {
+  stopVad();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  ctx.createMediaStreamSource(stream).connect(analyser);
+  const buf = new Float32Array(analyser.fftSize);
+  const started = Date.now();
+  let lastLoud = 0;
+  const timer = setInterval(() => {
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (const v of buf) sum += v * v;
+    const level = Math.sqrt(sum / buf.length);
+    const now = Date.now();
+    if (level > 0.02) lastLoud = now;
+    const spoke = lastLoud > 0;
+    if ((spoke && now - lastLoud > 900) || now - started > (spoke ? 8000 : 5000)) { stopVad(); onDone(); }
+  }, 100);
+  media.vad = { ctx, timer };
+}
+function stopVad() {
+  if (!media.vad) return;
+  clearInterval(media.vad.timer);
+  media.vad.ctx.close().catch(() => {});
+  media.vad = null;
 }
 
 function onSpoken(alts) {
@@ -363,7 +489,7 @@ function agentDown(err) {
 }
 function localNext() {
   const used = new Set(S.results.map(r => r.w).concat(S.queue.map(q => q.w)));
-  const pool = LEVELS[S.level].filter(x => !used.has(x.w));
+  const pool = dailyWords(S.level).filter(x => !used.has(x.w));
   const from = pool.length ? pool : LEVELS[S.level];
   return from[Math.floor(Math.random() * from.length)];
 }
@@ -372,13 +498,13 @@ function applyLevel(l) { if (l && LEVELS[l] && l !== S.level) setLevel(l); }
 /* ---------- flow ---------- */
 async function newRound() {
   const gen = ++S.gen;
-  clearTimeout(S.timer); stopListening(); synth && synth.cancel();
+  clearTimeout(S.timer); stopListening(); stopSpeech();
   S.pos = 0; S.results = []; S.requeued = new Set(); S.cur = null;
   S.waiting = false; S.advanceWhenReady = false; S.pending = null; S.why = "";
   $("log").innerHTML = ""; $("heard").hidden = false;
   if (!S.agent) {
     S.roundMode = "scripted";
-    S.queue = [...LEVELS[S.level]].sort(() => Math.random() - 0.5).slice(0, ROUND);
+    S.queue = [...dailyWords(S.level)].sort(() => Math.random() - 0.5);
     return present();
   }
   S.roundMode = "agent";
@@ -553,7 +679,7 @@ function finish() {
   setHeard(""); $("typed").hidden = true; $("heard").hidden = true;
   status("enter for another round.");
   render();
-  speak(`Done. ${ok} of ${first.length}.`);
+  speak(`Done. ${ok} of ${first.length}. Five new words tomorrow.`);
   showReminders();
 }
 
@@ -583,7 +709,7 @@ async function showReminders() {
 
 function skip() {
   if (!["prompt", "listening", "speaking"].includes(S.phase)) return;
-  synth && synth.cancel();
+  stopSpeech();
   setHeard("");
   if (S.agent) { S.pending = tutorTurn("skip", [], null, "skipped"); return; }
   answer("skipped", null).then(afterAnswer);
@@ -612,7 +738,7 @@ function repeat() {
 }
 
 function pause() {
-  stopListening(); synth && synth.cancel(); clearTimeout(S.timer);
+  stopListening(); stopSpeech(); clearTimeout(S.timer);
   S.handsFree = false;
   if (S.phase === "listening" || S.phase === "speaking") S.phase = "prompt";
   status("paused. space to resume.");
@@ -629,7 +755,7 @@ function micPress() {
 }
 
 function enterType(msg) {
-  stopListening(); synth && synth.cancel(); clearTimeout(S.timer);
+  stopListening(); stopSpeech(); clearTimeout(S.timer);
   S.mode = "type"; S.handsFree = false;
   if (S.phase === "listening" || S.phase === "speaking") S.phase = "prompt";
   status(msg || (S.phase === "answered" ? "enter for next." : "enter to check. esc for voice."));
@@ -637,7 +763,7 @@ function enterType(msg) {
   $("typed").focus();
 }
 function exitType() {
-  if (!SR) return;
+  if (!SR && !S.useSarvam) return;
   S.mode = "voice";
   $("typed").blur();
   status("space to speak.");
@@ -693,7 +819,8 @@ function render() {
   const [n, of] = S.roundMode === "agent"
     ? [Math.min(S.results.length + (p === "answered" ? 0 : 1), ROUND), ROUND]
     : [Math.min(S.pos + 1, S.queue.length), S.queue.length];
-  $("meta").innerHTML = done ? "round complete" :
+  $("meta").innerHTML = done ? "round complete · five new words tomorrow" :
+    `today · ` +
     `${String(n).padStart(2, "0")} / ${String(of).padStart(2, "0")}` +
     `  ·  <b>${S.results.filter(r => r.verdict !== "missed" && r.verdict !== "skipped").length}</b> right` +
     `  ·  ${S.results.filter(r => r.verdict === "missed" || r.verdict === "skipped").length} missed`;
@@ -701,11 +828,11 @@ function render() {
   $("heard").hidden = typing || done;
   const mic = $("mic");
   mic.classList.toggle("on", p === "listening");
-  mic.disabled = !SR;
+  mic.disabled = !SR && !S.useSarvam;
   mic.setAttribute("aria-label", p === "listening" ? "stop listening" : "speak your answer");
   $("micLabel").textContent = p === "listening" || p === "speaking" ? "pause" : typing ? "use voice" : "speak";
   const vis = {
-    mic: !!SR && !done,
+    mic: (!!SR || S.useSarvam) && !done,
     next: p === "answered",
     skip: !done && p !== "answered" && p !== "thinking",
     hint: !done && p !== "answered" && p !== "thinking",
@@ -717,7 +844,11 @@ function render() {
   if (typing && !done && document.activeElement !== $("typed")) $("typed").focus();
 }
 function renderFooter() {
-  $("voiceNote").textContent = SR ? "speech runs through your browser's web speech api" : "no speech recognition here; chrome, edge or safari will do";
+  $("voiceNote").textContent = S.useSarvam ? "speech runs through sarvam (saarika + bulbul)"
+    : SR ? "speech runs through your browser's web speech api"
+    : "this browser has no speech recognition; switch voice to sarvam, or type";
+  $("engineWrap").hidden = !S.sarvam;
+  $("engineToggle").textContent = S.useSarvam ? "sarvam" : "browser";
   $("voiceToggle").textContent = S.voice ? "on" : "off";
   $("tutorNote").textContent = S.agent ? `tutor: ${S.agentModel}` : S.agentNote || "tutor: off, scripted mode";
   $("reminderWrap").hidden = !S.server;
@@ -730,9 +861,16 @@ $("reminderToggle").onclick = async () => {
   } catch {}
   renderFooter();
 };
+$("engineToggle").onclick = () => {
+  S.useSarvam = !S.useSarvam;
+  store.set("vocab.engine", S.useSarvam ? "sarvam" : "browser");
+  stopSpeech(); stopListening();
+  if (S.phase === "listening" || S.phase === "speaking") { S.phase = "prompt"; status("space to speak."); }
+  renderFooter(); render();
+};
 $("voiceToggle").onclick = () => {
   S.voice = !S.voice; store.set("vocab.voice", S.voice ? "on" : "off");
-  if (!S.voice && synth) synth.cancel();
+  if (!S.voice) stopSpeech();
   renderFooter();
 };
 
@@ -769,6 +907,9 @@ try {
   S.server = true;
   S.agent = st.agent; S.agentModel = st.model || "";
   S.demo = st.demo; S.repo = st.repo || ""; S.nativeReminders = st.nativeReminders;
+  S.sarvam = Boolean(st.sarvam);
+  // Browsers without Web Speech (Safari, Firefox) get Sarvam automatically; Chrome only on request.
+  S.useSarvam = S.sarvam && (store.get("vocab.engine") === "sarvam" || (!SR && store.get("vocab.engine") !== "browser"));
   if (!st.agent) S.agentNote = `tutor: off (${st.reason}), scripted mode`;
   S.remindersOn = (await (await fetch("/api/reminders")).json()).on;
 } catch {}

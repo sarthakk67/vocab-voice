@@ -1,9 +1,9 @@
 # vocab_
 
-A spoken vocabulary drill with an LLM tutor deciding what happens next. The page reads a definition aloud, you say the word, and the tutor judges your answer, picks the next word, adjusts difficulty, and schedules reminders for the words you missed.
+A spoken vocabulary drill with an LLM tutor deciding what happens next. Five words a day per level: the page reads a definition aloud, you say the word, and the tutor judges your answer, picks the next word, adjusts difficulty, and schedules reminders for the words you missed.
 
 **Live demo:** https://vocab-voice.onrender.com · **90-second walkthrough:** _link_
-Voice needs Chrome or Edge. Press `t` to type instead. The demo is on a free tier, so if nobody has used it for a while, the first load takes up to a minute.
+Voice works in any browser when Sarvam speech is on, and in Chrome or Edge without it. Press `t` to type instead. The demo is on a free tier, so if nobody has used it for a while, the first load takes up to a minute.
 
 ## What the agent actually decides
 
@@ -19,6 +19,19 @@ Each answer is one model call with five tools. The live demo runs on Gemini (`ge
 
 Before this version the same app was a scripted loop: a random word order, spelling-only scoring and fixed feedback lines. That version is still the fallback when the API is unavailable.
 
+## Five a day
+
+Each level holds 40 hand-written words, and each day serves five of them. Days are UTC-based and deterministic, so the page and the server always agree on today's set, and a word doesn't come back for at least five days (usually eight). A round is today's five; the tutor may also pull in a word from an earlier day that's due for review.
+
+## Speech
+
+| | in | out |
+|---|---|---|
+| Sarvam (`SARVAM_API_KEY`) | Saarika transcribes a recorded clip, server-side | Bulbul reads definitions and feedback |
+| Browser (fallback) | Web Speech API, Chrome and Edge only | `speechSynthesis` |
+
+Recording stops on its own about a second after you stop speaking. Sarvam is metered, so definitions' audio is cached server-side and speech calls have their own daily caps; the hosted demo defaults to browser speech and offers Sarvam through a footer toggle, except in browsers with no Web Speech, which get Sarvam automatically.
+
 ## Design choices
 
 - **Deterministic first, model second.** Exact and near-spelling answers are scored in the browser instantly. The tutor only picks the next word while "Correct." is spoken. Only answers that don't match wait on the model. This keeps most turns feeling immediate.
@@ -31,8 +44,8 @@ Before this version the same app was a scripted loop: a random word order, spell
 
 ## Limits
 
-- It's a prototype with 60 words, one tutor prompt, and no evaluation set yet for judging quality.
-- Speech recognition is the browser's Web Speech API. In Chrome, audio is processed by Google.
+- It's a prototype with 120 words, one tutor prompt, and no evaluation set yet for judging quality.
+- Speech goes to Sarvam or, on the browser path in Chrome, to Google.
 - On the hosted demo, learner data lives on the server's disk and may reset on redeploy. Reminders show up in the open tab. Native desktop notifications only work when running locally on macOS.
 
 ## Run locally
@@ -51,8 +64,11 @@ npm start            # http://localhost:4480
 | `DEMO` | off | Shows the demo banner. |
 | `NOTIFY` | `macos` on a Mac, else `page` | Where reminders are delivered. |
 | `TUTOR_DAILY_CAP` / `TUTOR_VISITOR_CAP` | 400 / 80 | Tutor calls per day. |
+| `SARVAM_API_KEY` | none | Enables Sarvam speech in and out. |
+| `SARVAM_TTS_SPEAKER` / `SARVAM_STT_MODEL` / `SARVAM_TTS_MODEL` | `kavya` / `saarika:v2.5` / `bulbul:v3` | |
+| `SPEECH_DAILY_CAP` / `SPEECH_VISITOR_CAP` | 600 / 120 | Sarvam calls per day. |
 | `REPO_URL` | none | Adds a "source" link to the banner. |
 
 ## Files
 
-`agent.js` has the tutor prompt, tools, and the Claude and Gemini loops. `learner.js` holds memory per visitor. `notifier.js` delivers macOS reminders. `server.js` has the HTTP server, visitor cookie and caps. `index.html` is the whole front end. `words.js` is the word bank.
+`agent.js` has the tutor prompt, tools, and the Claude and Gemini loops. `learner.js` holds memory per visitor. `notifier.js` delivers macOS reminders. `server.js` has the HTTP server, visitor cookie and caps. `index.html` is the whole front end. `words.js` is the word bank and the daily rotation. `sarvam.js` wraps Sarvam speech.

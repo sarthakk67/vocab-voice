@@ -1,6 +1,6 @@
 // The tutor agent: one model call per learner turn; the model decides via tools.
 // Same prompt, tools and validation for both providers; only the API loop differs.
-import { LEVELS, findWord, levelOf } from "./words.js";
+import { LEVELS, findWord, levelOf, dailyWords, dailySet, DAILY } from "./words.js";
 
 const hasClaude = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
 const hasGemini = Boolean(process.env.GEMINI_API_KEY);
@@ -12,9 +12,7 @@ export const MODEL = PROVIDER === "gemini" ? GEMINI_MODELS[0] : "claude-opus-5";
 const client = PROVIDER === "claude" ? new (await import("@anthropic-ai/sdk")).default() : null;
 const gemini = PROVIDER === "gemini" ? new (await import("@google/genai")).GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
-const BANK = Object.entries(LEVELS).map(([l, ws]) => `${l}: ${ws.map(x => x.w).join(", ")}`).join("\n");
-
-const SYSTEM = `You are the tutor behind a spoken vocabulary drill. The app reads a definition aloud, the learner says the word, and you decide what happens next. Your goal is durable recall: the learner should reliably produce these words days from now, not just score well today.
+const SYSTEM_BASE = `You are the tutor behind a spoken vocabulary drill. The app reads a definition aloud, the learner says the word, and you decide what happens next. Your goal is durable recall: the learner should reliably produce these words days from now, not just score well today.
 
 Each turn you receive one event:
 - start: a round is beginning. Pick the first word.
@@ -29,11 +27,13 @@ How to judge an answer. The input comes from browser speech recognition, so it i
 - none: not an attempt at all. A question ("use it in a sentence", "what part of speech is it"), a request, or chatter. Answer it briefly without giving the word away, and stay on the current word.
 If the local check says exact, the verdict is correct.
 
+Each day has its own five words per level. The learner works through today's five at their level; every day brings a different set.
+
 How to pick the next word, in priority order:
 1. A word missed or skipped earlier this session, once at least two other words have come between.
-2. Words due for review from earlier sessions.
-3. Unseen words at the learner's current level.
-Never repeat any of the last three words asked. Only pick from the word bank.
+2. Today's words at the learner's level that they haven't had yet this session.
+3. A word due for review from an earlier day, when today's five are done or the learner keeps getting them right.
+Never repeat any of the last three words asked. Pick only from the words listed below.
 
 Difficulty. The learner chose a starting level, but you own it. If they get four of the last five right at this level with no hints, move them up. If they miss three of the last five, move them down. Use set_difficulty, say so in one short sentence, and pick the next word from the new level. Do not change level more than once per round.
 
@@ -48,8 +48,23 @@ Voice. The app is quiet and a little dry, for people who already know how to foc
 - feedback is shown under the verdict mark. Lowercase, under 12 words, or empty. It adds something the mark doesn't: why the answer was off, or how it differs from the target. The app already shows the verdict and the target word, so never just restate them; leave feedback empty rather than repeat. For none, leave it empty.
 - why_next is shown faintly. Under 6 words, lowercase, e.g. "missed earlier", "due for review", "new at hard".
 
-Word bank:
-${BANK}`;
+`;
+
+// Today's five per level, plus anything this learner has already met, so reviews stay possible.
+function systemFor(learner) {
+  const today = dailySet();
+  const seen = learner.seenWords().filter(w => !Object.values(today).flat().some(x => x.w === w));
+  return `${SYSTEM_BASE}
+
+Today's words:
+${Object.entries(today).map(([l, ws]) => `${l}: ${ws.map(x => x.w).join(", ")}`).join("\n")}
+
+Seen on earlier days (available for review): ${seen.join(", ") || "none"}`;
+}
+
+function allowedWord(w, learner) {
+  return Boolean(findWord(w)) && (Object.values(dailySet()).flat().some(x => x.w === w) || learner.wordHistory(w));
+}
 
 const TOOLS = [
   {
@@ -135,7 +150,8 @@ function renderTurn(t, learner) {
   if (t.word) lines.push(`hints used on this word: ${t.hints ?? 0}`);
   lines.push(
     `this session, oldest first: ${session.map(s => `${s.w} ${s.verdict}`).join(", ") || "nothing yet"}`,
-    `answers left in this round after this one: ${Math.max(0, (t.roundSize ?? 10) - session.length - (t.event === "start" ? 0 : 1))}`,
+    `answers left in this round after this one: ${Math.max(0, (t.roundSize ?? DAILY) - session.length - (t.event === "start" ? 0 : 1))}`,
+    `today's words at ${learner.getLevel()}: ${dailyWords(learner.getLevel()).map(w => w.w).join(", ")}`,
     `learner level: ${snap.level}`,
     `due for review: ${snap.due.join(", ") || "none"}`,
     `weak words: ${snap.weak.join(", ") || "none"}`,
@@ -170,7 +186,8 @@ function runTool(name, input, turn, trace, learner) {
       if (!learner.remindersOn()) return { content: "reminders are off; nothing scheduled", error: true };
       const bad = input.words.filter(w => !findWord(w));
       if (bad.length || !input.words.length) return { content: `not in the word bank: ${bad.join(", ") || "(no words)"}`, error: true };
-      const mins = Math.min(Math.max(input.minutes_from_now, 5), 10080);
+      const mins = Math.min(Math.max(Math.round(Number(input.minutes_from_now)), 5), 10080);
+      if (!Number.isFinite(mins)) return { content: "minutes_from_now must be a number between 5 and 10080.", error: true };
       const r = learner.addReminder(mins, input.words, input.message);
       trace.push(`schedule_reminder(${input.words.join(",")} in ${mins}m)`);
       return { content: `scheduled for ${new Date(r.at).toLocaleString()}` };
@@ -179,8 +196,8 @@ function runTool(name, input, turn, trace, learner) {
       trace.push(`word_history(${input.word})`);
       return { content: JSON.stringify(learner.wordHistory(input.word) ?? "never seen") };
     case "respond": {
-      if (input.next_word && !findWord(input.next_word))
-        return { content: `"${input.next_word}" is not in the word bank. Pick a word from the bank.`, error: true };
+      if (input.next_word && !allowedWord(input.next_word, learner))
+        return { content: `"${input.next_word}" is not available today. Pick one of today's words or a word the learner has seen before.`, error: true };
       if (!input.next_word && (input.verdict !== "none" || turn.event === "start"))
         return { content: "next_word is required here.", error: true };
       if (turn.event === "skip" && input.verdict !== "skipped")
@@ -205,8 +222,8 @@ export async function runTurn(turn, learner) {
   const trace = [];
   const exec = (name, input) => runTool(name, input, turn, trace, learner);
   const final = PROVIDER === "gemini"
-    ? await geminiLoop(renderTurn(turn, learner), exec)
-    : await claudeLoop(renderTurn(turn, learner), exec);
+    ? await geminiLoop(renderTurn(turn, learner), exec, systemFor(learner))
+    : await claudeLoop(renderTurn(turn, learner), exec, systemFor(learner));
   return {
     ...final,
     next: final.next_word ? findWord(final.next_word) : null,
@@ -215,7 +232,7 @@ export async function runTurn(turn, learner) {
   };
 }
 
-async function claudeLoop(prompt, exec) {
+async function claudeLoop(prompt, exec, system) {
   const messages = [{ role: "user", content: prompt }];
   for (let step = 0; step < 4; step++) {
     const res = await client.beta.messages.create({
@@ -225,7 +242,7 @@ async function claudeLoop(prompt, exec) {
       fallbacks: "default",
       output_config: { effort: "low" }, // one short decision per turn; latency matters more than depth
       cache_control: { type: "ephemeral" },
-      system: SYSTEM,
+      system,
       tools: TOOLS,
       messages,
     });
@@ -256,12 +273,12 @@ const GEMINI_TOOLS = [{
   functionDeclarations: TOOLS.map(t => ({ name: t.name, description: t.description, parametersJsonSchema: t.input_schema })),
 }];
 
-async function geminiCall(contents) {
+async function geminiCall(contents, system) {
   let lastErr;
   for (const model of GEMINI_MODELS) {
     try {
       return await gemini.models.generateContent({ model, contents, config: {
-        systemInstruction: SYSTEM,
+        systemInstruction: system,
         tools: GEMINI_TOOLS,
         thinkingConfig: { thinkingLevel: "LOW" }, // one short decision per turn; latency matters more than depth
       } });
@@ -274,10 +291,10 @@ async function geminiCall(contents) {
   throw lastErr;
 }
 
-async function geminiLoop(prompt, exec) {
+async function geminiLoop(prompt, exec, system) {
   const contents = [{ role: "user", parts: [{ text: prompt }] }];
   for (let step = 0; step < 4; step++) {
-    const res = await geminiCall(contents);
+    const res = await geminiCall(contents, system);
     const content = res.candidates?.[0]?.content;
     const calls = res.functionCalls ?? [];
     if (!content) throw new Error(`no response from model (${res.promptFeedback?.blockReason ?? res.candidates?.[0]?.finishReason ?? "empty"})`);

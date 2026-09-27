@@ -6,7 +6,8 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { forLearner, validId } from "./learner.js";
 import { startNotifier, NATIVE } from "./notifier.js";
-import { findWord } from "./words.js";
+import { findWord, DAILY } from "./words.js";
+import * as sarvam from "./sarvam.js";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 4480;
@@ -15,6 +16,9 @@ const REPO_URL = process.env.REPO_URL || "";
 // Shared-link guardrails: the whole server and each visitor get a daily budget of tutor calls.
 const DAILY_CAP = Number(process.env.TUTOR_DAILY_CAP) || 400;
 const VISITOR_CAP = Number(process.env.TUTOR_VISITOR_CAP) || 80;
+// Sarvam speech is metered in credits, so it gets its own budget.
+const SPEECH_DAILY_CAP = Number(process.env.SPEECH_DAILY_CAP) || 600;
+const SPEECH_VISITOR_CAP = Number(process.env.SPEECH_VISITOR_CAP) || 120;
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
 const PUBLIC = new Set(["/index.html", "/words.js"]);
 
@@ -23,16 +27,24 @@ const hasKey = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AU
 const agent = hasKey ? await import("./agent.js") : null;
 startNotifier();
 
-const usage = { day: "", total: 0, byVisitor: new Map() };
-function spend(id) {
+const budgets = {
+  tutor: { day: "", total: 0, byVisitor: new Map(), cap: DAILY_CAP, each: VISITOR_CAP },
+  speech: { day: "", total: 0, byVisitor: new Map(), cap: SPEECH_DAILY_CAP, each: SPEECH_VISITOR_CAP },
+};
+function spend(which, id) {
+  const b = budgets[which];
   const day = new Date().toISOString().slice(0, 10);
-  if (usage.day !== day) Object.assign(usage, { day, total: 0, byVisitor: new Map() });
-  const mine = usage.byVisitor.get(id) ?? 0;
-  if (usage.total >= DAILY_CAP || mine >= VISITOR_CAP) return false;
-  usage.total++;
-  usage.byVisitor.set(id, mine + 1);
+  if (b.day !== day) Object.assign(b, { day, total: 0, byVisitor: new Map() });
+  const mine = b.byVisitor.get(id) ?? 0;
+  if (b.total >= b.cap || mine >= b.each) return false;
+  b.total++;
+  b.byVisitor.set(id, mine + 1);
   return true;
 }
+
+// Definitions repeat all day; cache their audio so each one costs one credit, not one per listener.
+const ttsCache = new Map();
+const TTS_CACHE_MAX = 300;
 
 const send = (res, code, body, type = "application/json", headers = {}) => {
   res.writeHead(code, { "content-type": type, ...headers });
@@ -59,7 +71,7 @@ function cleanTurn(t) {
     local: ["correct", "close", "synonym", "missed", "skipped"].includes(t.local) ? t.local : "missed",
     hints: Math.min(Number(t.hints) || 0, 2),
     typed: Boolean(t.typed),
-    roundSize: 10,
+    roundSize: DAILY,
     session: (Array.isArray(t.session) ? t.session : []).slice(-20)
       .filter(s => findWord(s?.w)).map(s => ({ w: s.w, verdict: str(s.verdict, 10) })),
   };
@@ -74,7 +86,7 @@ http.createServer(async (req, res) => {
     if (url.pathname === "/api/status")
       return send(res, 200, {
         agent: Boolean(agent), model: agent?.MODEL, reason: agent ? undefined : "no API key",
-        demo: DEMO, repo: REPO_URL, nativeReminders: NATIVE,
+        demo: DEMO, repo: REPO_URL, nativeReminders: NATIVE, sarvam: sarvam.configured(),
       }, undefined, set);
 
     if (url.pathname === "/api/reminders") {
@@ -88,11 +100,40 @@ http.createServer(async (req, res) => {
       if (!agent) return send(res, 503, { error: "agent disabled" }, undefined, set);
       let raw = "";
       for await (const chunk of req) { raw += chunk; if (raw.length > 20_000) return send(res, 413, { error: "too large" }); }
-      if (!spend(v.id)) return send(res, 429, { error: "demo limit reached for today" }, undefined, set);
+      if (!spend("tutor", v.id)) return send(res, 429, { error: "demo limit reached for today" }, undefined, set);
       const t0 = Date.now();
       const out = await agent.runTurn(cleanTurn(JSON.parse(raw)), learner);
       console.log(`turn ${Date.now() - t0}ms  ${v.id.slice(0, 4)}  ${out.trace.join("  ")}`);
       return send(res, 200, out, undefined, set);
+    }
+
+    if (url.pathname === "/api/tts" && req.method === "POST") {
+      if (!sarvam.configured()) return send(res, 503, { error: "sarvam not configured" }, undefined, set);
+      let raw = "";
+      for await (const chunk of req) { raw += chunk; if (raw.length > 8_000) return send(res, 413, { error: "too long" }); }
+      const text = String(JSON.parse(raw).text ?? "").slice(0, 400).trim();
+      if (!text) return send(res, 400, { error: "no text" }, undefined, set);
+      if (ttsCache.has(text)) return send(res, 200, { audio: ttsCache.get(text), cached: true }, undefined, set);
+      if (!spend("speech", v.id)) return send(res, 429, { error: "speech limit reached for today" }, undefined, set);
+      const audio = await sarvam.speak(text);
+      if (ttsCache.size >= TTS_CACHE_MAX) ttsCache.delete(ttsCache.keys().next().value);
+      ttsCache.set(text, audio);
+      return send(res, 200, { audio }, undefined, set);
+    }
+
+    if (url.pathname === "/api/stt" && req.method === "POST") {
+      if (!sarvam.configured()) return send(res, 503, { error: "sarvam not configured" }, undefined, set);
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > 2_000_000) return send(res, 413, { error: "clip too large" });
+        chunks.push(chunk);
+      }
+      if (!spend("speech", v.id)) return send(res, 429, { error: "speech limit reached for today" }, undefined, set);
+      const { text } = await sarvam.transcribe(Buffer.concat(chunks), req.headers["content-type"] || "audio/webm");
+      console.log(`stt ${size}B  ${v.id.slice(0, 4)}  "${text}"`);
+      return send(res, 200, { text }, undefined, set);
     }
 
     const file = url.pathname === "/" ? "/index.html" : url.pathname;

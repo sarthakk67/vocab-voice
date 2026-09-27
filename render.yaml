@@ -11,6 +11,8 @@ services:
         sync: false      # set in the Render dashboard, never in the repo
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: SARVAM_API_KEY
+        sync: false      # optional: enables Sarvam speech on the demo
       - key: REPO_URL
         value: https://github.com/sarthakk67/vocab-voice
       - key: TUTOR_DAILY_CAP
